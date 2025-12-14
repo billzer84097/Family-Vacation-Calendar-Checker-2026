@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Family Summer Unavailability Calendar</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 900px;
+      margin: auto;
+    }
+    h1 {
+      text-align: center;
+    }
+    #calendar {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      margin-top: 20px;
+    }
+    .day {
+      border: 1px solid #ccc;
+      padding: 8px;
+      min-height: 40px;
+      text-align: center;
+      cursor: pointer;
+      border-radius: 4px;
+      background: #f9f9f9;
+      position: relative;
+    }
+    .unavailable {
+      background-color: #ffb3b3;
+      border-color: #ff6b6b;
+    }
+    .note-badge {
+      font-size: 11px;
+      color: #555;
+      position: absolute;
+      bottom: 2px;
+      left: 4px;
+    }
+    #summary {
+      margin-top: 40px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+    }
+    .family-color {
+      font-weight: bold;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Family Summer Unavailability</h1>
+
+<label>Select Family:</label>
+<select id="familySelect">
+  <option value="">-- Choose One --</option>
+  <option>The Smiths</option>
+  <option>The Johnsons</option>
+  <option>The Millers</option>
+  <option>The Taylors</option>
+  <option>The Robertsons</option>
+  <option>The Browns</option>
+  <option>The Wilsons</option>
+  <option>The Davis Family</option>
+</select>
+
+<br><br>
+
+<button onclick="saveToCloud()">Save / Update</button>
+<button onclick="deleteFamilyData()">Delete My Family’s Data</button>
+
+<div id="calendar"></div>
+
+<h2>Family Summary</h2>
+<div id="summary">Loading…</div>
+
+<script>
+// === CONFIG ===
+const API_URL = "https://script.google.com/macros/s/AKfycbyTUJgEy1zpN_VR_FPJGdP2_HKry4Mw9gtrsIhGAwJAlUtSm80BKR3_e4GqbVEyt_GP4A/exec";
+
+// Family colors for summary
+const familyColors = {
+  "The Smiths": "#ff9999",
+  "The Johnsons": "#ffcc99",
+  "The Millers": "#ffff99",
+  "The Taylors": "#ccffcc",
+  "The Robertsons": "#99ffff",
+  "The Browns": "#ccccff",
+  "The Wilsons": "#ffb3ff",
+  "The Davis Family": "#ffd699"
+};
+
+let selectedFamily = "";
+let localData = {}; 
+
+document.getElementById("familySelect").addEventListener("change", (e) => {
+  selectedFamily = e.target.value;
+  loadFamilyLocal();
+});
+
+function createCalendar() {
+  const calendar = document.getElementById("calendar");
+  calendar.innerHTML = "";
+
+  const start = new Date("2026-06-01");
+  const end = new Date("2026-08-31");
+
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().split("T")[0];
+    const div = document.createElement("div");
+    div.className = "day";
+    div.dataset.date = dateStr;
+    div.textContent = d.getDate();
+
+    if (localData[dateStr]) {
+      div.classList.add("unavailable");
+      if (localData[dateStr].note) {
+        const badge = document.createElement("div");
+        badge.className = "note-badge";
+        badge.textContent = "📝";
+        div.appendChild(badge);
+      }
+    }
+
+    div.onclick = () => toggleDay(dateStr);
+    div.oncontextmenu = (e) => {
+      e.preventDefault();
+      editNote(dateStr);
+    };
+
+    calendar.appendChild(div);
+  }
+}
+
+function toggleDay(date) {
+  if (!selectedFamily) return alert("Select a family first.");
+
+  if (localData[date]) {
+    delete localData[date];
+  } else {
+    localData[date] = { note: "" };
+  }
+  saveFamilyLocal();
+  createCalendar();
+}
+
+function editNote(date) {
+  if (!selectedFamily) return alert("Select a family first.");
+
+  const current = localData[date]?.note || "";
+  const note = prompt("Add a note:", current);
+  if (note === null) return;
+
+  if (!localData[date]) {
+    localData[date] = { note: note };
+  } else {
+    localData[date].note = note;
+  }
+  saveFamilyLocal();
+  createCalendar();
+}
+
+function saveFamilyLocal() {
+  localStorage.setItem("family_" + selectedFamily, JSON.stringify(localData));
+}
+
+function loadFamilyLocal() {
+  localData = JSON.parse(localStorage.getItem("family_" + selectedFamily) || "{}");
+  createCalendar();
+}
+
+async function saveToCloud() {
+  if (!selectedFamily) return alert("Choose a family first.");
+
+  const entries = Object.keys(localData).map(date => ({
+    date: date,
+    note: localData[date].note || ""
+  }));
+
+  await fetch(API_URL, {
+    method: "POST",
+    body: JSON.stringify({ family: selectedFamily, entries })
+  });
+
+  alert("Saved!");
+  loadSummary();
+}
+
+async function deleteFamilyData() {
+  if (!selectedFamily) return alert("Choose a family first.");
+  if (!confirm("Delete ALL data for " + selectedFamily + "?")) return;
+
+  await fetch(API_URL, {
+    method: "POST",
+    body: JSON.stringify({ family: selectedFamily, entries: [] })
+  });
+
+  localData = {};
+  saveFamilyLocal();
+  createCalendar();
+  loadSummary();
+}
+
+async function loadSummary() {
+  const res = await fetch(API_URL);
+  const data = await res.json();
+
+  const summaryDiv = document.getElementById("summary");
+  summaryDiv.innerHTML = "";
+
+  const grouped = {};
+
+  data.forEach(row => {
+    if (!grouped[row.family]) grouped[row.family] = [];
+    grouped[row.family].push(row.date);
+  });
+
+  Object.keys(grouped).forEach(family => {
+    const color = familyColors[family] || "#eee";
+    const div = document.createElement("div");
+    div.innerHTML = `<span class="family-color" style="background:${color}">${family}</span>: ${grouped[family].join(", ")}`;
+    summaryDiv.appendChild(div);
+  });
+}
+
+createCalendar();
+loadSummary();
+
+</script>
+</body>
+</html>
